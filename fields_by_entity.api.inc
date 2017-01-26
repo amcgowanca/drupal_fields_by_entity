@@ -59,6 +59,6 @@ function hook_fields_by_entity_widget_form_item_alter(&$item_element, EntityDrup
  *     - 'instance': The field's instance.
  *     - 'langcode': The langcode specified for rendering this field.
  */
-function hook_fields_by_entity_formatter_item_alter(&$element, EntityDrupalWrapper $item, array $context = array()) {
+function hook_fields_by_entity_formatter_item_alter(&$element, EntityDrupalWrapper $item, EntityDrupalWrapper $parent_wrapper, array $context = array()) {
   $item_element['prefix'] = '<div class="some-css-class">My formatted element prefix.</div>';
 }

@@ -493,7 +493,7 @@ function fields_by_entity_field_formatter_view($entity_type, $entity, $field, $i
           $renderable_item = array(
             '#markup' => $item['wrapper']->label(),
           );
-          drupal_alter('fields_by_entity_formatter_item', $renderable_item, $item['wrapper'], $alter_context);
+          drupal_alter('fields_by_entity_formatter_item', $renderable_item, $item['wrapper'], $entity_wrapper, $alter_context);
           $element['#items'][] = array(
             'data' => render($renderable_item)
           );
