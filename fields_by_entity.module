@@ -49,7 +49,6 @@ function fields_by_entity_field_settings_form($field, $instance, $has_data) {
     '#title' => t('Fields by Entity configuration'),
     '#process' => array('_fields_by_entity_field_settings_form_process'),
     '#element_validate' => array('_fields_by_entity_field_settings_form_validate'),
-    '#submit' => array('fields_by_entity_field_settings_form_ajax_submit'),
     '#field' => $field,
     '#instance' => $instance,
     '#has_data' => $has_data,
@@ -67,7 +66,7 @@ function fields_by_entity_field_settings_form($field, $instance, $has_data) {
  */
 function _fields_by_entity_field_settings_form_process($element, &$form_state) {
   $field = $element['#field'];
-  $field_settings = isset($form_state['values']['field']['settings']) ? $form_state['values']['field']['settings'] : $field['settings'];
+  $field_settings = isset($form_state['fields_by_entity']['field']['settings']) ? $form_state['fields_by_entity']['field']['settings'] : $field['settings'];
   // If the form was submitted, let's check and validate the field settings as
   // some of the field setting values are dependent upon each other.
   if (isset($form_state['values']['submit'])) {
@@ -113,6 +112,7 @@ function _fields_by_entity_field_settings_form_process($element, &$form_state) {
   if (!isset($field_settings['entity_type'])) {
     if (1 == count($entity_types_options)) {
       $entity_type_default_value = key($entity_types_options);
+      $field_settings['entity_type'] = $entity_type_default_value;
     }
   }
   else {
@@ -137,11 +137,12 @@ function _fields_by_entity_field_settings_form_process($element, &$form_state) {
     '#weight' => -15,
   );
 
-  if (!empty($field_settings['entity_type']) && !empty($entity_bundle_options[$field_settings['entity_type']])) {
+  if (!empty($entity_type_default_value) && !empty($entity_bundle_options[$entity_type_default_value])) {
     $entity_bundle_default_value = '';
     if (!isset($field_settings['bundle'])) {
       if (1 == count($entity_bundle_options[$field_settings['entity_type']])) {
         $entity_bundle_default_value = key($entity_bundle_options[$field_settings['entity_type']]);
+        $field_settings['bundle'] = $entity_bundle_default_value;
       }
     }
     else {
@@ -152,7 +153,7 @@ function _fields_by_entity_field_settings_form_process($element, &$form_state) {
       '#type' => 'select',
       '#title' => t('Entity bundle'),
       '#description' => '',
-      '#options' => $entity_bundle_options[$field_settings['entity_type']],
+      '#options' => $entity_bundle_options[$entity_type_default_value],
       '#empty_option' => t('- Select an entity bundle -'),
       '#empty_value' => 0,
       '#required' => TRUE,
@@ -180,6 +181,7 @@ function _fields_by_entity_field_settings_form_process($element, &$form_state) {
     if (!isset($field_settings['value_field'])) {
       if (1 == count($field_options)) {
         $value_field_default_value = key($field_options);
+        $field_settings['value_field'] = $value_field_default_value;
       }
     }
     else {
@@ -272,7 +274,11 @@ function _fields_by_entity_field_settings_form_process($element, &$form_state) {
  * Form callback; validates the field settings.
  */
 function _fields_by_entity_field_settings_form_validate($form, &$form_state) {
-  // Placeholder callback for when it is needed in the future.
+  $field = $form['#field'];
+  if (isset($form_state['values']['field']['settings'])) {
+    $field['settings'] = $form_state['values']['field']['settings'];
+  }
+  $form_state['fields_by_entity']['field'] = $field;
 }
 
 /**
