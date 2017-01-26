@@ -1,0 +1,537 @@
+<?php
+/**
+ * @file
+ * fields_by_entity.module
+ */
+
+/**
+ * Implements hook_element_info().
+ */
+function fields_by_entity_element_info() {
+  return array(
+    'fields_by_entity_element' => array(
+      '#theme' => 'fields_by_entity_element',
+    ),
+  );
+}
+
+/**
+ * Implements hook_theme().
+ */
+function fields_by_entity_theme() {
+  return array(
+    'fields_by_entity_element' => array(
+      'render element' => 'elements',
+    )
+  );
+}
+
+/**
+ * Implements hook_field_info().
+ */
+function fields_by_entity_field_info() {
+  $info = array();
+  $info['fields_by_entity_list'] = array(
+    'label' => t('List (fields_by_entity)'),
+    'description' => t('Allows for creating lists based on the referenced data value(s) of another entity.'),
+    'default_widget' => 'fields_by_entity_options',
+    'default_formatter' => 'fields_by_entity_list',
+  );
+  return $info;
+}
+
+/**
+ * Implements hook_field_settings_form().
+ */
+function fields_by_entity_field_settings_form($field, $instance, $has_data) {
+  $form = array(
+    '#type' => 'fieldset',
+    '#title' => t('Fields by Entity configuration'),
+    '#process' => array('_fields_by_entity_field_settings_form_process'),
+    '#element_validate' => array('_fields_by_entity_field_settings_form_validate'),
+    '#submit' => array('fields_by_entity_field_settings_form_ajax_submit'),
+    '#field' => $field,
+    '#instance' => $instance,
+    '#has_data' => $has_data,
+  );
+  if ($has_data) {
+    $form['#description'] = t('Settings and configuration for this field cannot be changed as the field has data.');
+  }
+  return $form;
+}
+
+/**
+ * Form element process handler; builds the field settings form elements.
+ *
+ * @see fields_by_entity_field_settings_form().
+ */
+function _fields_by_entity_field_settings_form_process($element, &$form_state) {
+  $field = $element['#field'];
+  $field_settings = isset($form_state['values']['field']['settings']) ? $form_state['values']['field']['settings'] : $field['settings'];
+  // If the form was submitted, let's check and validate the field settings as
+  // some of the field setting values are dependent upon each other.
+  if (isset($form_state['values']['submit'])) {
+    // Check the entity type specification, if different from the saved values
+    // in $field['settings'], ensure all fields are reset. If only the bundle
+    // was changed, only reset the field specification and entity fields.
+    if (!empty($field['settings']['entity_type']) && !empty($field_settings['entity_type']) && $field_settings['entity_type'] != $field['settings']['entity_type']) {
+      $field_settings['bundle'] = '';
+      $field_settings['value_field'] = '';
+      $field_settings['entity'] = '';
+    }
+    elseif (!empty($field['settings']['bundle']) && !empty($field_settings['bundle']) && $field_settings['bundle'] != $field['settings']['bundle']) {
+      $field_settings['value_field'] = '';
+      $field_settings['entity'] = '';
+    }
+  }
+
+  $instance = $element['#instance'];
+  $has_data = $element['#has_data'];
+
+  $entity_info = entity_get_info();
+
+  $entity_types_options = array();
+  $entity_bundle_options = array();
+  foreach ($entity_info as $entity_type => $info) {
+    if (0 < count($info['bundles'])) {
+      // Prior to building the allowed option, ensure that this entity has at
+      // least one bundle that can be referenced.
+      $entity_types_options[$entity_type] = $info['label'] . ' (' . $entity_type . ')';
+      // Build a list of available bundles.
+      foreach ($info['bundles'] as $bundle => $bundle_info) {
+        $entity_bundle_options[$entity_type][$bundle] = $bundle_info['label'] . ' (' . $bundle . ')';
+      }
+    }
+  }
+  // Allow other modules to alter the available entity types and bundles. This
+  // ensure that correct entities are being made available so that non-technical
+  // users who may be leveraging this field type to build content do not create
+  // problematic behaviours.
+  drupal_alter('fields_by_entity_allowed_entity_types', $entity_types_options, $entity_bundle_options);
+
+  $entity_type_default_value = '';
+  if (!isset($field_settings['entity_type'])) {
+    if (1 == count($entity_types_options)) {
+      $entity_type_default_value = key($entity_types_options);
+    }
+  }
+  else {
+    $entity_type_default_value = $field_settings['entity_type'];
+  }
+
+  $element['entity_type'] = array(
+    '#type' => 'select',
+    '#title' => t('Entity type'),
+    '#description' => t('Select the entity type to which the referenced entity field values will be used.'),
+    '#options' => $entity_types_options,
+    '#empty_option' => t('- Select an entity type -'),
+    '#empty_value' => 0,
+    '#required' => TRUE,
+    '#default_value' => $entity_type_default_value,
+    '#disabled' => $has_data,
+    '#ajax' => array(
+      'callback' => 'fields_by_entity_field_settings_form_ajax_callback',
+      'wrapper' => $element['#id'],
+      'element' => $element['#array_parents'],
+    ),
+    '#weight' => -15,
+  );
+
+  if (!empty($field_settings['entity_type']) && !empty($entity_bundle_options[$field_settings['entity_type']])) {
+    $entity_bundle_default_value = '';
+    if (!isset($field_settings['bundle'])) {
+      if (1 == count($entity_bundle_options[$field_settings['entity_type']])) {
+        $entity_bundle_default_value = key($entity_bundle_options[$field_settings['entity_type']]);
+      }
+    }
+    else {
+      $entity_bundle_default_value = $field_settings['bundle'];
+    }
+
+    $element['bundle'] = array(
+      '#type' => 'select',
+      '#title' => t('Entity bundle'),
+      '#description' => '',
+      '#options' => $entity_bundle_options[$field_settings['entity_type']],
+      '#empty_option' => t('- Select an entity bundle -'),
+      '#empty_value' => 0,
+      '#required' => TRUE,
+      '#default_value' => $entity_bundle_default_value,
+      '#ajax' => array(
+        'callback' => 'fields_by_entity_field_settings_form_ajax_callback',
+        'wrapper' => $element['#id'],
+        'element' => $element['#array_parents'],
+      ),
+      '#disabled' => $has_data,
+      '#weight' => -10,
+    );
+  }
+
+  if (!empty($entity_type_default_value) && !empty($entity_bundle_default_value)) {
+    $field_instances = field_info_instances($entity_type_default_value, $entity_bundle_default_value);
+    $field_options = array();
+    foreach ($field_instances as $field_name => $field_instance) {
+      if ($field_info = field_read_field($field_name)) {
+        $field_options[$field_name] = $field_instance['label'] . ' (' . $field_info['type'] . ')';
+      }
+    }
+
+    $value_field_default_value = '';
+    if (!isset($field_settings['value_field'])) {
+      if (1 == count($field_options)) {
+        $value_field_default_value = key($field_options);
+      }
+    }
+    else {
+      $value_field_default_value = $field_settings['value_field'];
+    }
+
+    $element['value_field'] = array(
+      '#type' => 'select',
+      '#title' => t('Field to use for generating value'),
+      '#description' => t('Select the field which is used for generating the field value.'),
+      '#options' => $field_options,
+      '#empty_option' => t('- Select a field -'),
+      '#empty_value' => 0,
+      '#required' => TRUE,
+      '#default_value' => $value_field_default_value,
+      '#weight' => -5,
+      '#disabled' => $has_data,
+    );
+
+    $entity_label = '';
+    if (!empty($field_settings['entity'])) {
+      $entities = entity_load($entity_type_default_value, array($field_settings['entity']['entity_id']));
+      if (!empty($entities) && isset($entities[$field_settings['entity']['entity_id']])) {
+        $entity = $entities[$field_settings['entity']['entity_id']];
+        $wrapper = entity_metadata_wrapper($field_settings['entity_type'], $entities[$field_settings['entity']['entity_id']]);
+        $entity_label = $wrapper->label() . ' (' . $wrapper->getIdentifier() . ')';
+      }
+    }
+
+    $element['entity'] = array(
+      '#type' => 'entityreference',
+      '#title' => t('Entity'),
+      '#description' => t("Select the entity that will be used to generate this Field's widget form elements and their values."),
+      '#required' => TRUE,
+      '#default_value' => $entity_label,
+      '#era_entity_type' => $entity_type_default_value,
+      '#era_bundles' => array($entity_bundle_default_value),
+      '#era_cardinality' => 1,
+      '#era_query_settings' => array(),
+      '#weight' => 0,
+      '#disabled' => $has_data,
+    );
+    if (module_exists('references_dialog') && !$has_data) {
+      $target_element = array('edit', 'field', 'settings', 'entity');
+      // Concatenate the selected entity type and bundle by a dash to create a
+      // the suffix used for generating the References Dialog operation keys.
+      $operation_key_suffix = implode('-', array($entity_type_default_value, $entity_bundle_default_value));
+      // Generate the 'Add link' (create new) operation.
+      $add_operation = references_dialog_entityreference_link_helper($entity_type_default_value, $entity_bundle_default_value);
+      // The Edit link helper function returns the link within an array parent
+      // array, resulting in the need to use `current()`.
+      if (!empty($entity_label)) {
+        $edit_operation = references_dialog_entityreference_edit_link($element['entity'], array(), array('settings' => array('target_type' => $field_settings['entity_type'])), NULL);
+      }
+      else {
+        $edit_operation = FALSE;
+      }
+
+      // The title can become extremely long and confusing as it does not always
+      // align with the same naming and terminology used by the 'Edit link'. As
+      // a result, the add link and edit link should be updated to reflect the
+      // operation. For example, 'Create entity' vs. 'Create new [entity-label]'
+      // as the edit link is simply 'Edit. However, we update this to
+      // 'Edit Entity'.
+      if (!empty($add_operation)) {
+        $add_operation['title'] = t('Create entity');
+      }
+      if (!empty($edit_operation)) {
+        $edit_operation = current($edit_operation);
+        $edit_operation['title'] = t('Edit entity');
+      }
+      $element['entity_dialog'] = array(
+        '#type' => 'references_dialog',
+        '#title' => t('Entity options'),
+        '#target' => implode('-', $target_element),
+        '#format' => '$label ($entity_id)',
+        '#operations' => array(
+          'add-' . $operation_key_suffix => $add_operation,
+          'edit-' . $operation_key_suffix => $edit_operation,
+        ),
+        '#weight' => 5,
+        '#disabled' => $has_data,
+      );
+    }
+  }
+  return $element;
+}
+
+/**
+ * Form callback; validates the field settings.
+ */
+function _fields_by_entity_field_settings_form_validate($form, &$form_state) {
+  // Placeholder callback for when it is needed in the future.
+}
+
+/**
+ * Form ajax callback; returns the required form elements based on the trigger.
+ */
+function fields_by_entity_field_settings_form_ajax_callback($form, &$form_state) {
+  return drupal_array_get_nested_value($form, $form_state['triggering_element']['#ajax']['element']);
+}
+
+/**
+ * Implements hook_field_widget_info().
+ */
+function fields_by_entity_field_widget_info() {
+  $info = array();
+  $info['fields_by_entity_options'] = array(
+    'label' => t('Check boxes/radio buttons'),
+    'description' => t('Uses a the configured field attached to the entity type and bundle for building an options list.'),
+    'field types' => array('fields_by_entity_list'),
+    'behaviors' => array(
+      'multiple values' => FIELD_BEHAVIOR_CUSTOM,
+    ),
+  );
+  return $info;
+}
+
+/**
+ * Implements hook_field_widget_form().
+ */
+function fields_by_entity_field_widget_form(&$form, &$form_state, $field, $instance, $langcode, $items, $delta, $element) {
+  $element += array(
+    '#type' => 'fields_by_entity_element',
+    '#element_validate' => array('fields_by_entity_field_widget_validate'),
+    '#tree' => TRUE,
+  );
+
+  $field_settings = $field['settings'];
+  // Do some pre-validating before attempting to generate the widget form. Exit
+  // early and return an empty element if the core field settings are empty.
+  if (!_fields_by_entity_field_settings_exist($field_settings)) {
+    return $element;
+  }
+
+  $entities = entity_load($field['settings']['entity_type'], array($field['settings']['entity']['entity_id']));
+  if (!empty($entities)) {
+    $wrapper = entity_metadata_wrapper($field_settings['entity_type'], current($entities));
+    $value_field_name = isset($field_settings['value_field']) ? $field_settings['value_field'] : '';
+    if (!empty($value_field_name) && isset($wrapper->{$value_field_name})) {
+      $value_field = $wrapper->{$value_field_name};
+      if (!($value_field instanceof EntityListWrapper)) {
+        throw new FieldException(t('Field type %type does not support currently support non-entity listed values from %value_field.', array(
+          '%type' => $field['type'],
+          '%value_field' => $field['settings']['value_field'],
+        )));
+      }
+
+      // Build an array of contextual information related to this field's
+      // widget for rendering.
+      $field_context_info = array(
+        'field '=> $field,
+        'instance' => $instance,
+        'langcode' => $langcode,
+      );
+      // Build a list of useable values and wrapper elements to build the widget
+      // with as $items is not necessarily the most usable array of values given
+      // we need to perform a search on the $item['value'] to retrieve the
+      // entity wrapper element for it.
+      $items = fields_by_entity_field_items_build($items, $value_field, TRUE, TRUE);
+
+      switch ($instance['widget']['type']) {
+        case 'fields_by_entity_options':
+          $element_type = 1 == $field['cardinality'] ? 'radio' : 'checkbox';
+          foreach ($value_field as $item) {
+            $item_element = array(
+              '#type' => $element_type,
+              '#title' => $item->label(),
+              '#return_value' => $item->getIdentifier(),
+              '#entity_wrapper' => $item,
+            );
+            if (isset($items[$item->getIdentifier()])) {
+              $item_element['#default_value'] = $item->getIdentifier();
+            }
+            // Allow other modules to alter the $item_element prior to appending
+            // and building the widget element.
+            drupal_alter('fields_by_entity_widget_form_item', $item_element, $item, $wrapper, $field_context_info);
+            // Add the altered item element to the widget element tree.
+            $element[$item->getIdentifier()]['value'] = $item_element;
+          }
+          break;
+      }
+    }
+  }
+  return $element;
+}
+
+/**
+ * Form element callback; validates the options widgets for #required state.
+ *
+ * @see fields_by_entity_field_widget_form().
+ */
+function fields_by_entity_field_widget_validate($element, &$form_state) {
+  if ($element['#required']) {
+    $has_value = FALSE;
+    foreach (element_children($element) as $key) {
+      if (!empty($element[$key]['value']['#value'])) {
+        $has_value = TRUE;
+      }
+    }
+    if (!$has_value) {
+      form_error($element, t('!name field is required.', array('!name' => $element['#title'])));
+    }
+  }
+}
+
+/**
+ * Implements hook_field_formatter_info().
+ */
+function fields_by_entity_field_formatter_info() {
+  $info = array();
+  $info['fields_by_entity_list'] = array(
+    'label' => t('List of values (fields_by_entity)'),
+    'description' => t('Renders a list of entity values based on selection.'),
+    'field types' => array('fields_by_entity_list'),
+    'settings' => array(),
+  );
+  return $info;
+}
+
+/**
+ * Builds an array of usable item values.
+ *
+ * @param array $items
+ *   An array of value items.
+ * @param \EntityListWrapper $value_field
+ *   The EntityListWrapper object of the $field['settings']['value_field'].
+ * @param bool $include_wrapper
+ *   A boolean indicating whether the return array should include the single
+ *   item's entity wrapper object.
+ * @param bool $key_by_value
+ *   A boolean indicating whether return array is keyed by the delta value or
+ *   the item's value.
+ *
+ * @return array
+ *   An array of valid usable values.
+ */
+function fields_by_entity_field_items_build(array $items, EntityListWrapper $value_field, $include_wrapper = TRUE, $key_by_value = FALSE) {
+  $values = array();
+  $field_values = array();
+  foreach ($value_field as $value_wrapper) {
+    $field_values[$value_wrapper->getIdentifier()] = $value_wrapper;
+  }
+
+  foreach ($items as $delta => $item) {
+    if (!empty($item['value']) && isset($field_values[$item['value']])) {
+      $key = $key_by_value ? $field_values[$item['value']]->getIdentifier() : $delta;
+      $values[$key] = array(
+        'value' => $item['value'],
+      );
+      if ($include_wrapper) {
+        $values[$key]['wrapper'] = $field_values[$item['value']];
+      }
+    }
+  }
+  return $values;
+}
+
+/**
+ * Implements hook_field_formatter_view().
+ */
+function fields_by_entity_field_formatter_view($entity_type, $entity, $field, $instance, $langcode, $items, $display) {
+  $element = array();
+  // Attempt to load the referenced entity based on the field's settings and
+  // configuration. If it doesn't exist, exit early.
+  $entity = entity_load($field['settings']['entity_type'], array($field['settings']['entity']['entity_id']));
+  $entity = !empty($entity) ? current($entity) : NULL;
+  if (empty($entity)) {
+    watchdog('fields_by_entity', 'The field %fieldname is configured with an invalid entity being used for referential data.', array('%fieldname' => $field['field_name']));
+    return $element;
+  }
+  // We've made it this far, let's create an entity wrapper to easily retrieve
+  // data values based on the references.
+  $entity_wrapper = entity_metadata_wrapper($field['settings']['entity_type'], $entity);
+  if (!isset($entity_wrapper->{$field['settings']['value_field']})) {
+    watchdog('fields_by_entity', 'The field %fieldname is configured with an invalid value_field for entity reference.', array('%fieldname' => $field['field_name']));
+    return $element;
+  }
+
+  $value_field_wrapper = $entity_wrapper->{$field['settings']['value_field']};
+  if (!($value_field_wrapper instanceof EntityListWrapper)) {
+    throw new FieldException(t('Field type %type does not support currently support non-entity listed values from %value_field.', array(
+      '%type' => $field['type'],
+      '%value_field' => $field['settings']['value_field'],
+    )));
+  }
+
+  $items = fields_by_entity_field_items_build($items, $value_field_wrapper, TRUE);
+
+  $alter_context = array(
+    'field' => $field,
+    'instance' => $instance,
+    'langcode' => $langcode,
+  );
+
+  switch ($display['type']) {
+    case 'fields_by_entity_list':
+      $element += array(
+        '#theme' => 'item_list',
+        '#items' => array(),
+      );
+
+      foreach ($items as $delta => $item) {
+        if (!empty($item['value'])) {
+          $renderable_item = array(
+            '#markup' => $item['wrapper']->label(),
+          );
+          drupal_alter('fields_by_entity_formatter_item', $renderable_item, $item['wrapper'], $alter_context);
+          $element['#items'][] = array(
+            'data' => render($renderable_item)
+          );
+        }
+      }
+      break;
+  }
+
+  return $element;
+}
+
+/**
+ * Implements hook_field_is_empty().
+ */
+function fields_by_entity_field_is_empty($item, $field) {
+  return empty($item['value']);
+}
+
+/**
+ * Theme callback for the `fields_by_entity_element`.
+ */
+function theme_fields_by_entity_element(&$variables) {
+  $elements = &$variables['elements'];
+
+  $children = array();
+  // Compile an array of all child elements so that they can be rendered into a
+  // single string output for $elements['#children']. This allows us to use the
+  // `form_element` theme callback to build the output of this element.
+  foreach (element_children($elements) as $child_key) {
+    $children[$child_key] = $elements[$child_key];
+  }
+  $elements['#children'] = drupal_render($children);
+  return theme('form_element', $elements);
+}
+
+/**
+ * Checks whether or not all field settings exist.
+ *
+ * @param array $field_settings
+ *   An array of possible field settings to check.
+ *
+ * @return bool
+ *   Returns TRUE if all exist, otherwise FALSE.
+ */
+function _fields_by_entity_field_settings_exist(array $field_settings) {
+  return (empty($field_settings['entity_type']) || empty($field_settings['bundle']) || empty($field_settings['entity']) || empty($field_settings['entity']['entity_id'])) ? FALSE : TRUE;
+}

@@ -1,0 +1,25 @@
+<?php
+/**
+ * @file
+ * fields_by_entity.install
+ */
+
+/**
+ * Implements hook_field_schema().
+ */
+function fields_by_entity_field_schema() {
+  $field_schema = array();
+  $field_schema['columns'] = array(
+    'value' => array(
+      'description' => 'The value.',
+      'type' => 'varchar',
+      'length' => 255,
+      'not null' => TRUE,
+      'default' => '',
+    ),
+  );
+  $field_schema['indexes'] = array(
+    'value' => array('value'),
+  );
+  return $field_schema;
+}

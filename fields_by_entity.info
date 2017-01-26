@@ -1,0 +1,11 @@
+name = Fields by Entity
+description = A field that allows for the selection of a referenced entity and the ability to use its data to create field widgets.
+core = 7.x
+version = 7.x-0.1
+package = Fields by Entity
+
+dependencies[] = entity
+dependencies[] = entityreference_autocomplete
+dependencies[] = field
+dependencies[] = field_ui
+dependencies[] = references_dialog
