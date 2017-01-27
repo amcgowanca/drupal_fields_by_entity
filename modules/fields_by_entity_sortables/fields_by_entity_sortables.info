@@ -1,0 +1,7 @@
+name = Fields by Entity: Sortables
+description = Provides the field widget UI for allowing items to be sorted through a drag-drop interface.
+core = 7.x
+version = 7.x-0.1
+package = Fields by Entity
+
+dependencies[] = fields_by_entity

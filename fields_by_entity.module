@@ -321,53 +321,41 @@ function fields_by_entity_field_widget_form(&$form, &$form_state, $field, $insta
     return $element;
   }
 
-  $entities = entity_load($field['settings']['entity_type'], array($field['settings']['entity']['entity_id']));
-  if (!empty($entities)) {
-    $wrapper = entity_metadata_wrapper($field_settings['entity_type'], current($entities));
-    $value_field_name = isset($field_settings['value_field']) ? $field_settings['value_field'] : '';
-    if (!empty($value_field_name) && isset($wrapper->{$value_field_name})) {
-      $value_field = $wrapper->{$value_field_name};
-      if (!($value_field instanceof EntityListWrapper)) {
-        throw new FieldException(t('Field type %type does not support currently support non-entity listed values from %value_field.', array(
-          '%type' => $field['type'],
-          '%value_field' => $field['settings']['value_field'],
-        )));
-      }
+  if ($wrapper = fields_by_entity_get_entity($field)) {
+    $value_field = fields_by_entity_get_value_field($field, $wrapper);
+    // Build an array of contextual information related to this field's
+    // widget for rendering.
+    $field_context_info = array(
+      'field '=> $field,
+      'instance' => $instance,
+      'langcode' => $langcode,
+    );
+    // Build a list of useable values and wrapper elements to build the widget
+    // with as $items is not necessarily the most usable array of values given
+    // we need to perform a search on the $item['value'] to retrieve the
+    // entity wrapper element for it.
+    $items = fields_by_entity_field_items_build($items, $value_field, TRUE, TRUE);
 
-      // Build an array of contextual information related to this field's
-      // widget for rendering.
-      $field_context_info = array(
-        'field '=> $field,
-        'instance' => $instance,
-        'langcode' => $langcode,
-      );
-      // Build a list of useable values and wrapper elements to build the widget
-      // with as $items is not necessarily the most usable array of values given
-      // we need to perform a search on the $item['value'] to retrieve the
-      // entity wrapper element for it.
-      $items = fields_by_entity_field_items_build($items, $value_field, TRUE, TRUE);
-
-      switch ($instance['widget']['type']) {
-        case 'fields_by_entity_options':
-          $element_type = 1 == $field['cardinality'] ? 'radio' : 'checkbox';
-          foreach ($value_field as $item) {
-            $item_element = array(
-              '#type' => $element_type,
-              '#title' => $item->label(),
-              '#return_value' => $item->getIdentifier(),
-              '#entity_wrapper' => $item,
-            );
-            if (isset($items[$item->getIdentifier()])) {
-              $item_element['#default_value'] = $item->getIdentifier();
-            }
-            // Allow other modules to alter the $item_element prior to appending
-            // and building the widget element.
-            drupal_alter('fields_by_entity_widget_form_item', $item_element, $item, $wrapper, $field_context_info);
-            // Add the altered item element to the widget element tree.
-            $element[$item->getIdentifier()]['value'] = $item_element;
+    switch ($instance['widget']['type']) {
+      case 'fields_by_entity_options':
+        $element_type = 1 == $field['cardinality'] ? 'radio' : 'checkbox';
+        foreach ($value_field as $item) {
+          $item_element = array(
+            '#type' => $element_type,
+            '#title' => $item->label(),
+            '#return_value' => $item->getIdentifier(),
+            '#entity_wrapper' => $item,
+          );
+          if (isset($items[$item->getIdentifier()])) {
+            $item_element['#default_value'] = $item->getIdentifier();
           }
-          break;
-      }
+          // Allow other modules to alter the $item_element prior to appending
+          // and building the widget element.
+          drupal_alter('fields_by_entity_widget_form_item', $item_element, $item, $wrapper, $field_context_info);
+          // Add the altered item element to the widget element tree.
+          $element[$item->getIdentifier()]['value'] = $item_element;
+        }
+        break;
     }
   }
   return $element;
@@ -379,17 +367,21 @@ function fields_by_entity_field_widget_form(&$form, &$form_state, $field, $insta
  * @see fields_by_entity_field_widget_form().
  */
 function fields_by_entity_field_widget_validate($element, &$form_state) {
-  if ($element['#required']) {
-    $has_value = FALSE;
-    foreach (element_children($element) as $key) {
-      if (!empty($element[$key]['value']['#value'])) {
-        $has_value = TRUE;
-      }
-    }
-    if (!$has_value) {
-      form_error($element, t('!name field is required.', array('!name' => $element['#title'])));
+  $values = array();
+  foreach (element_children($element) as $key) {
+    $item = $element[$key];
+    if (!empty($item['value']['#value'])) {
+      $values[$key] = array(
+        'value' => $item['value']['#value'],
+      );
     }
   }
+
+  if ($element['#required'] && empty($values)) {
+    form_error($element, t('!name field is required.', array('!name' => $element['#title'])));
+  }
+
+  form_set_value($element, $values, $form_state);
 }
 
 /**
@@ -449,60 +441,45 @@ function fields_by_entity_field_items_build(array $items, EntityListWrapper $val
  */
 function fields_by_entity_field_formatter_view($entity_type, $entity, $field, $instance, $langcode, $items, $display) {
   $element = array();
-  // Attempt to load the referenced entity based on the field's settings and
-  // configuration. If it doesn't exist, exit early.
-  $entity = entity_load($field['settings']['entity_type'], array($field['settings']['entity']['entity_id']));
-  $entity = !empty($entity) ? current($entity) : NULL;
-  if (empty($entity)) {
-    watchdog('fields_by_entity', 'The field %fieldname is configured with an invalid entity being used for referential data.', array('%fieldname' => $field['field_name']));
-    return $element;
-  }
-  // We've made it this far, let's create an entity wrapper to easily retrieve
-  // data values based on the references.
-  $entity_wrapper = entity_metadata_wrapper($field['settings']['entity_type'], $entity);
-  if (!isset($entity_wrapper->{$field['settings']['value_field']})) {
-    watchdog('fields_by_entity', 'The field %fieldname is configured with an invalid value_field for entity reference.', array('%fieldname' => $field['field_name']));
-    return $element;
-  }
+  if ($entity_wrapper = fields_by_entity_get_entity($field)) {
+    $value_field_wrapper = fields_by_entity_get_value_field($field, $entity_wrapper);
+    $items = fields_by_entity_field_items_build($items, $value_field_wrapper, TRUE);
+    $alter_context = array(
+      'field' => $field,
+      'instance' => $instance,
+      'langcode' => $langcode,
+    );
 
-  $value_field_wrapper = $entity_wrapper->{$field['settings']['value_field']};
-  if (!($value_field_wrapper instanceof EntityListWrapper)) {
-    throw new FieldException(t('Field type %type does not support currently support non-entity listed values from %value_field.', array(
-      '%type' => $field['type'],
-      '%value_field' => $field['settings']['value_field'],
-    )));
-  }
+    switch ($display['type']) {
+      case 'fields_by_entity_list':
+        $element += array(
+          '#theme' => 'item_list',
+          '#items' => array(),
+        );
 
-  $items = fields_by_entity_field_items_build($items, $value_field_wrapper, TRUE);
-
-  $alter_context = array(
-    'field' => $field,
-    'instance' => $instance,
-    'langcode' => $langcode,
-  );
-
-  switch ($display['type']) {
-    case 'fields_by_entity_list':
-      $element += array(
-        '#theme' => 'item_list',
-        '#items' => array(),
-      );
-
-      foreach ($items as $delta => $item) {
-        if (!empty($item['value'])) {
-          $renderable_item = array(
-            '#markup' => $item['wrapper']->label(),
-          );
-          drupal_alter('fields_by_entity_formatter_item', $renderable_item, $item['wrapper'], $entity_wrapper, $alter_context);
-          $element['#items'][] = array(
-            'data' => render($renderable_item)
-          );
+        foreach ($items as $delta => $item) {
+          if (!empty($item['value'])) {
+            $renderable_item = array(
+              '#markup' => $item['wrapper']->label(),
+            );
+            drupal_alter('fields_by_entity_formatter_item', $renderable_item, $item['wrapper'], $entity_wrapper, $alter_context);
+            $element['#items'][] = array(
+              'data' => render($renderable_item)
+            );
+          }
         }
-      }
-      break;
+        break;
+    }
   }
 
   return $element;
+}
+
+/**
+ * Implements hook_field_validate().
+ */
+function fields_by_entity_field_validate($entity_type, $entity, $field, $instance, $langcode, $items, &$errors) {
+  return _field_filter_items($field, $items);
 }
 
 /**
@@ -510,6 +487,63 @@ function fields_by_entity_field_formatter_view($entity_type, $entity, $field, $i
  */
 function fields_by_entity_field_is_empty($item, $field) {
   return empty($item['value']);
+}
+
+/**
+ * Retrieves the Entity's metadata wrapper object for the $field configuration.
+ *
+ * @param array $field
+ *   The field's configuration array.
+ *
+ * @return EntityMetadataWrapper
+ *   Returns the entity metadata wrapper object otherwise false if an error has
+ *   occurred.
+ */
+function fields_by_entity_get_entity($field) {
+  if (_fields_by_entity_field_settings_exist($field)) {
+    return FALSE;
+  }
+  // Attempt to load the referenced entity based on the field's settings and
+  // configuration. If it doesn't exist, exit early.
+  $entity = entity_load($field['settings']['entity_type'], array($field['settings']['entity']['entity_id']));
+  $entity = !empty($entity) ? current($entity) : NULL;
+  if (empty($entity)) {
+    watchdog('fields_by_entity', 'The field %fieldname is configured with an invalid entity being used for referential data.', array('%fieldname' => $field['field_name']));
+    return FALSE;
+  }
+  // We've made it this far, let's create an entity wrapper to easily retrieve
+  // data values based on the references.
+  $entity_wrapper = entity_metadata_wrapper($field['settings']['entity_type'], $entity);
+  if (!isset($entity_wrapper->{$field['settings']['value_field']})) {
+    watchdog('fields_by_entity', 'The field %fieldname is configured with an invalid value_field for entity reference.', array('%fieldname' => $field['field_name']));
+    return FALSE;
+  }
+  return $entity_wrapper;
+}
+
+/**
+ * Retrieves the value field's entity metadata wrapper object.
+ *
+ * @param array $field
+ *   The field configuration array.
+ * @param EntityDrupalWrapper $entity_wrapper
+ *   The entit wrapper for the referenced field.
+ *
+ * @return EntityListWrapper
+ *   Returns the value field metadata wrapper.
+ *
+ * @throws \FieldException
+ *   Thrown if the value field wrapper is not an instance of EntityListWrapper.
+ */
+function fields_by_entity_get_value_field($field, EntityDrupalWrapper $entity_wrapper) {
+  $value_field_wrapper = $entity_wrapper->{$field['settings']['value_field']};
+  if (!($value_field_wrapper instanceof EntityListWrapper)) {
+    throw new FieldException(t('Field type %type does not support currently support non-entity listed values from %value_field.', array(
+      '%type' => $field['type'],
+      '%value_field' => $field['settings']['value_field'],
+    )));
+  }
+  return $value_field_wrapper;
 }
 
 /**

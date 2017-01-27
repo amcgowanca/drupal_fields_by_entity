@@ -1,0 +1,22 @@
+<?php
+/**
+ * @file
+ * fields_by_entity_sortables.install
+ */
+
+/**
+ * Implements hook_field_schema().
+ */
+function fields_by_entity_sortables_field_schema() {
+  module_load_install('fields_by_entity');
+  $schema = fields_by_entity_field_schema();
+  $schema['columns']['weight'] = array(
+    'description' => 'The weight of the item.',
+    'type' => 'int',
+    'unsigned' => TRUE,
+    'not null' => FALSE,
+    'default' => 0,
+  );
+  $schema['indexes']['weight'] = array('weight');
+  return $schema;
+}

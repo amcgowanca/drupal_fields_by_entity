@@ -14,7 +14,7 @@ function fields_by_entity_field_schema() {
       'description' => 'The value.',
       'type' => 'varchar',
       'length' => 255,
-      'not null' => TRUE,
+      'not null' => FALSE,
       'default' => '',
     ),
   );
