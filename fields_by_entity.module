@@ -11,8 +11,29 @@ function fields_by_entity_element_info() {
   return array(
     'fields_by_entity_element' => array(
       '#theme' => 'fields_by_entity_element',
+      '#process' => array('fields_by_entity_element_process'),
     ),
   );
+}
+
+/**
+ * Form element process callback for `fields_by_entity_element`.
+ *
+ * @see fields_by_entity_element_info().
+ */
+function fields_by_entity_element_process($element) {
+  $field = field_read_field($element['#field_name']);
+  if (1 == $field['cardinality']) {
+    $parents = $element['#parents'];
+    array_push($parents, 'value');
+    foreach (element_children($element) as $index) {
+      if (isset($element[$index]['value'])) {
+        $element[$index]['value']['#parents'] = $parents;
+        $element[$index]['value']['#array_parents'] = $parents;
+      }
+    }
+  }
+  return $element;
 }
 
 /**
@@ -349,6 +370,7 @@ function fields_by_entity_field_widget_form(&$form, &$form_state, $field, $insta
           if (isset($items[$item->getIdentifier()])) {
             $item_element['#default_value'] = $item->getIdentifier();
           }
+
           // Allow other modules to alter the $item_element prior to appending
           // and building the widget element.
           drupal_alter('fields_by_entity_widget_form_item', $item_element, $item, $wrapper, $field_context_info);
@@ -367,13 +389,27 @@ function fields_by_entity_field_widget_form(&$form, &$form_state, $field, $insta
  * @see fields_by_entity_field_widget_form().
  */
 function fields_by_entity_field_widget_validate($element, &$form_state) {
+  $field = field_read_field($element['#field_name']);
   $values = array();
-  foreach (element_children($element) as $key) {
-    $item = $element[$key];
-    if (!empty($item['value']['#value'])) {
-      $values[$key] = array(
-        'value' => $item['value']['#value'],
-      );
+  if (FIELD_CARDINALITY_UNLIMITED == $field['cardinality'] || 1 < $field['cardinality']) {
+    foreach (element_children($element) as $key) {
+      $item = $element[$key];
+      if (!empty($item['value']['#value'])) {
+        $values[$key] = array(
+          'value' => $item['value']['#value'],
+        );
+      }
+    }
+  }
+  // We assume that if the cardinality for this field is not unlimited or is not
+  // equal to or greater than 2, the <input type="..." /> is of type radio.
+  // Therefore, all submitted elements will have the same identical value due
+  // to having the same #name attribute value.
+  else {
+    $children = element_children($element);
+    $index = current($children);
+    if (isset($element[$index]) && !empty($element[$index]['value']['#value'])) {
+      $values[$index] = array('value' => $element[$index]['value']['#value']);
     }
   }
 
